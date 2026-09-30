@@ -369,6 +369,8 @@ export function RunFooterView(props: RunFooterViewProps) {
     width,
     theme,
     history: props.history,
+    queuedPrompts,
+    onQueuedRemove: props.onQueuedRemove,
     onSubmit: props.onSubmit,
     onCycle: props.onCycle,
     onInterrupt: props.onInterrupt,

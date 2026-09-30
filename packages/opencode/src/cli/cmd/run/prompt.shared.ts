@@ -93,6 +93,19 @@ export function pushPromptHistory(state: PromptHistoryState, prompt: RunPrompt):
   }
 }
 
+export function popPromptHistory(state: PromptHistoryState): PromptHistoryState {
+  if (state.items.length === 0) {
+    return state
+  }
+
+  return {
+    ...state,
+    items: state.items.slice(0, -1),
+    index: null,
+    draft: "",
+  }
+}
+
 export function movePromptHistory(state: PromptHistoryState, dir: -1 | 1, text: string, cursor: number): PromptMove {
   if (state.items.length === 0) {
     return { state, apply: false }

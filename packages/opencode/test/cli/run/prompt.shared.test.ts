@@ -4,6 +4,7 @@ import {
   isExitCommand,
   isNewCommand,
   movePromptHistory,
+  popPromptHistory,
   pushPromptHistory,
 } from "@/cli/cmd/run/prompt.shared"
 import type { RunPrompt } from "@/cli/cmd/run/types"
@@ -27,6 +28,12 @@ describe("run prompt shared", () => {
     expect(pushPromptHistory(base, prompt("   ")).items.map((item) => item.text)).toEqual(["one"])
     expect(pushPromptHistory(base, prompt("one")).items.map((item) => item.text)).toEqual(["one"])
     expect(pushPromptHistory(base, prompt("two")).items.map((item) => item.text)).toEqual(["one", "two"])
+  })
+
+  test("pop removes the latest history item", () => {
+    const base = createPromptHistory([prompt("one"), prompt("two")])
+    expect(popPromptHistory(base).items.map((item) => item.text)).toEqual(["one"])
+    expect(popPromptHistory(createPromptHistory()).items).toEqual([])
   })
 
   test("moves through history only at input boundaries and restores draft", () => {

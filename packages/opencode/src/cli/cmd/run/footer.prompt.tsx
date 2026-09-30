@@ -21,13 +21,24 @@ import {
   mentionTriggerIndex,
   isNewCommand,
   movePromptHistory,
+  popPromptHistory,
+  promptSame,
   pushPromptHistory,
 } from "./prompt.shared"
 import { OPENCODE_BASE_MODE, useBindings } from "@opencode-ai/tui/keymap"
 import { realignEditorPromptParts, resolveEditorSlashValue } from "./prompt.editor"
 import { FOOTER_MENU_ROWS, createFooterMenuState, type RunFooterMenuItem } from "./footer.menu"
 import type { RunFooterTheme } from "./theme"
-import type { FooterState, RunAgent, RunCommand, RunPrompt, RunPromptPart, RunResource, RunTuiConfig } from "./types"
+import type {
+  FooterQueuedPrompt,
+  FooterState,
+  RunAgent,
+  RunCommand,
+  RunPrompt,
+  RunPromptPart,
+  RunResource,
+  RunTuiConfig,
+} from "./types"
 
 const AUTOCOMPLETE_ROWS = FOOTER_MENU_ROWS
 const AUTOCOMPLETE_BOTTOM_ROWS = 1
@@ -68,6 +79,8 @@ type PromptInput = {
   width: Accessor<number>
   theme: Accessor<RunFooterTheme>
   history?: RunPrompt[]
+  queuedPrompts?: Accessor<FooterQueuedPrompt[]>
+  onQueuedRemove?: (messageID: string) => boolean | Promise<boolean>
   onSubmit: (input: RunPrompt) => boolean | Promise<boolean>
   onCycle: () => void
   onInterrupt: () => boolean
@@ -762,7 +775,39 @@ export function createPromptState(input: PromptInput): PromptState {
     return true
   }
 
+  const recallQueued = (event: KeyEvent) => {
+    if (history.index !== null) {
+      return false
+    }
+
+    const queued = input.queuedPrompts?.() ?? []
+    if (queued.length === 0) {
+      return false
+    }
+
+    const item = queued[queued.length - 1]
+    if (!item) {
+      return false
+    }
+
+    stash = clonePrompt(draft)
+    void input.onQueuedRemove?.(item.messageID)
+    if (history.items.length > 0 && promptSame(history.items[history.items.length - 1], item.prompt)) {
+      history = popPromptHistory(history)
+    }
+
+    restore(item.prompt, Bun.stringWidth(item.prompt.text))
+    event.preventDefault()
+    return true
+  }
+
   const historyCommand = (dir: -1 | 1, event: KeyEvent) => {
+    if (dir === -1 && area && !area.isDestroyed && area.cursorOffset === 0) {
+      if (recallQueued(event)) {
+        return true
+      }
+    }
+
     if (move(dir, event)) return
     if (!area || area.isDestroyed) return false
 

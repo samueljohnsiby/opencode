@@ -20,6 +20,7 @@ import { RunFooterView } from "@/cli/cmd/run/footer.view"
 import { RunEntryContent } from "@/cli/cmd/run/scrollback.writer"
 import { RUN_THEME_FALLBACK, type RunTheme } from "@/cli/cmd/run/theme"
 import type {
+  FooterQueuedPrompt,
   FooterState,
   FooterSubagentState,
   FooterSubagentTab,
@@ -164,8 +165,11 @@ async function renderFooter(
     width?: number
     height?: number
     state?: Partial<FooterState>
+    queuedPrompts?: () => FooterQueuedPrompt[]
+    history?: RunPrompt[]
     onCycle?: () => void
     onSubmit?: (prompt: RunPrompt) => boolean
+    onQueuedRemove?: (messageID: string) => Promise<boolean>
   } = {},
 ) {
   const [view] = createSignal<FooterView>({ type: "prompt" })
@@ -196,6 +200,8 @@ async function renderFooter(
           state={state}
           view={view}
           subagent={subagents}
+          queuedPrompts={input.queuedPrompts}
+          history={input.history}
           theme={input.theme ?? (() => RUN_THEME_FALLBACK)}
           tuiConfig={config}
           backgroundSubagents={input.backgroundSubagents ?? true}
@@ -214,7 +220,7 @@ async function renderFooter(
           onRows={() => {}}
           onLayout={() => {}}
           onStatus={() => {}}
-          onQueuedRemove={async () => true}
+          onQueuedRemove={input.onQueuedRemove ?? (async () => true)}
         />
       </OpencodeKeymapProvider>
     )
@@ -1409,3 +1415,80 @@ test("direct variant panel renders current variant selector", async () => {
     app.renderer.destroy()
   }
 })
+
+test("direct footer recalls queued prompt to composer on up arrow", async () => {
+  const [queueCount, setQueueCount] = createSignal(2)
+  const [prompts, setPrompts] = createSignal<FooterQueuedPrompt[]>([
+    { messageID: "m-1", partID: "p-1", prompt: { text: "first queued", parts: [] } },
+    { messageID: "m-2", partID: "p-2", prompt: { text: "second queued", parts: [] } },
+  ])
+  const removed: string[] = []
+  const submits: RunPrompt[] = []
+
+  const app = await renderFooter({
+    state: { phase: "running", queue: 2 },
+    queuedPrompts: prompts,
+    history: [{ text: "historical prompt", parts: [] }],
+    onQueuedRemove: async (id) => {
+      removed.push(id)
+      setPrompts((prev) => prev.filter((item) => item.messageID !== id))
+      return true
+    },
+    onSubmit: (prompt) => {
+      submits.push(prompt)
+      return true
+    },
+  })
+
+  try {
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("2 queued")
+
+    // Press Up Arrow to recall the latest queued prompt ("second queued")
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+
+    expect(removed).toEqual(["m-2"])
+    expect(app.captureCharFrame()).toContain("second queued")
+
+    // Type extra text and submit to verify it can be edited and resent
+    " edited".split("").forEach((key) => app.mockInput.pressKey(key))
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("second queued edited")
+
+    app.mockInput.pressEnter()
+    await app.renderOnce()
+    expect(submits).toEqual([{ text: "second queued edited", parts: [] }])
+
+    // Now press Up Arrow again at the empty prompt to recall the remaining prompt ("first queued")
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+
+    expect(removed).toEqual(["m-2", "m-1"])
+    expect(app.captureCharFrame()).toContain("first queued")
+
+    // With queue now empty, pressing Up Arrow moves to history (the submitted prompt was added to history)
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("second queued edited")
+
+    // Navigating older in history reaches the older historical prompt
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+    app.mockInput.pressKey("ARROW_UP")
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("historical prompt")
+
+    // Pressing Down Arrow navigates back forward
+    app.mockInput.pressKey("ARROW_DOWN")
+    await app.renderOnce()
+    app.mockInput.pressKey("ARROW_DOWN")
+    await app.renderOnce()
+    expect(app.captureCharFrame()).toContain("second queued edited")
+  } finally {
+    app.cleanup()
+  }
+})
+
